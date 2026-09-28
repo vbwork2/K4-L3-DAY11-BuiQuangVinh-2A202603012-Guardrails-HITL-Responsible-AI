@@ -45,6 +45,8 @@ _MODEL_REFUSE_MARKERS = (
     "unable to provide",
     "i cannot provide",
     "i can't provide",
+    "i cannot assist",
+    "i can't assist",
     "i cannot share",
     "i can't share",
     "i will not",

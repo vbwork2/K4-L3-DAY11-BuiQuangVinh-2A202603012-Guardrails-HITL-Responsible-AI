@@ -70,12 +70,14 @@ class OpenAIRunner:
             {"role": "system", "content": agent.instruction},
             {"role": "user", "content": user_message},
         ]
+        request = {"model": self.model, "messages": messages}
+        if not (
+            self.provider == "openai"
+            and self.model.startswith(("gpt-5.6-", "gpt-6-"))
+        ):
+            request["temperature"] = self.temperature
         try:
-            completion = client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=self.temperature,
-            )
+            completion = client.chat.completions.create(**request)
         except NotFoundError as exc:
             unavailable_blue_endpoint = (
                 self.provider == "openrouter"
@@ -88,9 +90,7 @@ class OpenAIRunner:
             # OpenRouter may serve the same Liquid model only through its free variant.
             print("Blue endpoint unavailable; retrying liquid/lfm-2.5-2.6b:free")
             completion = client.chat.completions.create(
-                model="liquid/lfm-2.5-2.6b:free",
-                messages=messages,
-                temperature=self.temperature,
+                **{**request, "model": "liquid/lfm-2.5-2.6b:free"}
             )
         text = (completion.choices[0].message.content or "").strip()
 
