@@ -51,25 +51,47 @@ class OpenAIRunner:
 
         return OpenAI(**(self.client_kwargs or {}))
 
-    async def chat(self, agent: OpenAIAgent, user_message: str) -> str:
+    async def chat(
+        self, agent: OpenAIAgent, user_message: str, user_id: str = "student"
+    ) -> str:
         for hook in self.input_hooks:
             blocked = hook(user_message)
             if blocked:
                 return blocked
 
-        block_msg = await self._run_input_plugins(user_message)
+        block_msg = await self._run_input_plugins(user_message, user_id=user_id)
         if block_msg is not None:
             return block_msg
 
+        from openai import NotFoundError
+
         client = self._client()
-        completion = client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": agent.instruction},
-                {"role": "user", "content": user_message},
-            ],
-            temperature=self.temperature,
-        )
+        messages = [
+            {"role": "system", "content": agent.instruction},
+            {"role": "user", "content": user_message},
+        ]
+        try:
+            completion = client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=self.temperature,
+            )
+        except NotFoundError as exc:
+            unavailable_blue_endpoint = (
+                self.provider == "openrouter"
+                and self.model == "liquid/lfm-2.5-2.6b"
+                and "No endpoints found for liquid/lfm-2.5-2.6b" in str(exc)
+            )
+            if not unavailable_blue_endpoint:
+                raise
+
+            # OpenRouter may serve the same Liquid model only through its free variant.
+            print("Blue endpoint unavailable; retrying liquid/lfm-2.5-2.6b:free")
+            completion = client.chat.completions.create(
+                model="liquid/lfm-2.5-2.6b:free",
+                messages=messages,
+                temperature=self.temperature,
+            )
         text = (completion.choices[0].message.content or "").strip()
 
         for hook in self.output_hooks:
@@ -78,7 +100,9 @@ class OpenAIRunner:
         text = await self._run_output_plugins(text)
         return text
 
-    async def _run_input_plugins(self, user_message: str) -> str | None:
+    async def _run_input_plugins(
+        self, user_message: str, *, user_id: str = "student"
+    ) -> str | None:
         if not self.plugins:
             return None
         try:
@@ -90,7 +114,7 @@ class OpenAIRunner:
             role="user",
             parts=[types.Part.from_text(text=user_message)],
         )
-        ctx = _MockInvocationContext()
+        ctx = _MockInvocationContext(user_id=user_id)
         for plugin in self.plugins:
             cb = getattr(plugin, "on_user_message_callback", None)
             if cb is None:

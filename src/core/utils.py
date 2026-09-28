@@ -5,19 +5,23 @@ from core.config import get_llm_provider, PROVIDER_OPENROUTER  # noqa: F401
 from core.openai_runtime import OpenAIRunner
 
 
-async def chat_with_agent(agent, runner, user_message: str, session_id=None):
+async def chat_with_agent(
+    agent, runner, user_message: str, session_id=None, user_id="student"
+):
     """Send a message to the agent and get the response.
 
     Works with OpenAIRunner (OpenAI Red / OpenRouter Blue) and Google ADK (Gemini Red).
     """
     provider = getattr(runner, "provider", None)
-    if isinstance(runner, OpenAIRunner) or provider in ("openrouter", "openai"):
+    if isinstance(runner, OpenAIRunner):
+        text = await runner.chat(agent, user_message, user_id=user_id)
+        return text, None
+    if provider in ("openrouter", "openai"):
         text = await runner.chat(agent, user_message)
         return text, None
 
     from google.genai import types
 
-    user_id = "student"
     app_name = runner.app_name
 
     session = None

@@ -89,19 +89,20 @@ Respond with ONLY one word: SAFE or UNSAFE
 If UNSAFE, add a brief reason on the next line.
 """
 
-safety_judge_agent = llm_agent.LlmAgent(
-    model="gemini-3.5-flash",
-    name="safety_judge",
-    instruction=SAFETY_JUDGE_INSTRUCTION,
-)
-judge_runner = None
 safety_judge_agent = None
+judge_runner = None
 
 
 def _init_judge():
-    """Initialize the judge agent and runner (call after creating the agent)."""
-    global judge_runner
-    if safety_judge_agent is not None:
+    """Create the optional judge agent and runner on demand."""
+    global safety_judge_agent, judge_runner
+    if safety_judge_agent is None:
+        safety_judge_agent = llm_agent.LlmAgent(
+            model="gemini-3.5-flash",
+            name="safety_judge",
+            instruction=SAFETY_JUDGE_INSTRUCTION,
+        )
+    if judge_runner is None:
         judge_runner = runners.InMemoryRunner(
             agent=safety_judge_agent, app_name="safety_judge"
         )
@@ -140,9 +141,11 @@ async def llm_safety_check(response_text: str) -> dict:
 class OutputGuardrailPlugin(base_plugin.BasePlugin):
     """Plugin that checks agent output before sending to user."""
 
-    def __init__(self, use_llm_judge=True):
+    def __init__(self, use_llm_judge=False):
         super().__init__(name="output_guardrail")
-        self.use_llm_judge = use_llm_judge and (safety_judge_agent is not None)
+        if use_llm_judge:
+            _init_judge()
+        self.use_llm_judge = use_llm_judge
         self.blocked_count = 0
         self.redacted_count = 0
         self.total_count = 0
@@ -206,7 +209,7 @@ class OutputGuardrailPlugin(base_plugin.BasePlugin):
                     ],
                 )
 
-        return llm_response  # TODO: modify if needed
+        return llm_response
 
 
 # ============================================================
