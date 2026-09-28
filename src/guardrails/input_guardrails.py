@@ -18,9 +18,20 @@ from google.adk.plugins import base_plugin
 from google.adk.agents.invocation_context import InvocationContext
 
 from core.config import ALLOWED_TOPICS, BLOCKED_TOPICS
+import unicodedata
 
 # Quyết định rõ ràng — tránh đảo nghĩa True/False
 InputStatus = Literal["ALLOW", "BLOCK"]
+
+ZERO_WIDTH_CHARS = "\u200b\u200c\u200d\ufeff\u2060"
+
+
+def normalize_security_text(text: str) -> str:
+    """Normalize Unicode and remove invisible characters."""
+    normalized = unicodedata.normalize("NFKC", text or "")
+    return normalized.translate(
+        str.maketrans("", "", ZERO_WIDTH_CHARS)
+    ) 
 
 
 # ============================================================
@@ -43,25 +54,25 @@ InputStatus = Literal["ALLOW", "BLOCK"]
 # ============================================================
 
 def detect_injection(user_input: str) -> InputStatus:
-    """Detect prompt injection patterns in user input.
+    """Detect prompt injection patterns in user input."""
+    normalized = normalize_security_text(user_input)
 
-    Args:
-        user_input: The user's message
-
-    Returns:
-        ``"BLOCK"`` if injection detected (chặn), ``"ALLOW"`` otherwise (cho qua).
-    """
     INJECTION_PATTERNS = [
-        # TODO: Add at least 5 regex patterns
-        # Example:
-        # r"ignore (all )?(previous|above) instructions",
+        r"ignore\s+(?:all\s+)?(?:previous|above|prior)\s+instructions?",
+        r"\byou\s+are\s+now\b",
+        r"\bsystem\s+prompt\b",
+        r"\breveal\s+(?:your\s+)?(?:instructions?|prompt)\b",
+        r"\bpretend\s+(?:you\s+are|to\s+be)\b",
+        r"\bact\s+as\s+(?:a\s+|an\s+)?unrestricted\b",
+        r"\bdisregard\s+(?:all\s+)?(?:previous|above|prior)?\s*(?:instructions?|rules?)",
+        r"\boverride\s+(?:your\s+|the\s+)?(?:system\s+)?(?:prompt|instructions?)",
     ]
 
     for pattern in INJECTION_PATTERNS:
-        if re.search(pattern, user_input, re.IGNORECASE):
+        if re.search(pattern, normalized, re.IGNORECASE):
             return "BLOCK"
-    return "ALLOW"
 
+    return "ALLOW"
 
 # ============================================================
 # Implement topic_filter()
@@ -75,23 +86,18 @@ def detect_injection(user_input: str) -> InputStatus:
 # ============================================================
 
 def topic_filter(user_input: str) -> InputStatus:
-    """Decide whether the input is on-topic for VinBank.
+    """Decide whether the input is on-topic for VinBank."""
+    input_lower = normalize_security_text(user_input).lower()
 
-    Args:
-        user_input: The user's message
+    # Block explicitly forbidden topics first.
+    if any(topic in input_lower for topic in BLOCKED_TOPICS):
+        return "BLOCK"
 
-    Returns:
-        ``"BLOCK"`` = chặn (off-topic hoặc topic cấm).
-        ``"ALLOW"`` = cho qua (câu banking hợp lệ).
-    """
-    input_lower = user_input.lower()
+    # Must contain at least one banking-related topic.
+    if not any(topic in input_lower for topic in ALLOWED_TOPICS):
+        return "BLOCK"
 
-    # TODO: Implement logic:
-    # 1. If input contains any blocked topic -> return "BLOCK"
-    # 2. If input doesn't contain any allowed topic -> return "BLOCK"
-    # 3. Otherwise -> return "ALLOW"
-
-    pass  # Replace with your implementation
+    return "ALLOW"
 
 
 # ============================================================
@@ -144,14 +150,19 @@ class InputGuardrailPlugin(base_plugin.BasePlugin):
         self.total_count += 1
         text = self._extract_text(user_message)
 
-        # TODO: Implement logic:
-        # 1. Call detect_injection(text)
-        #    - If "BLOCK": increment blocked_count, return self._block_response("...")
-        # 2. Call topic_filter(text)
-        #    - If "BLOCK": increment blocked_count, return self._block_response("...")
-        # 3. If both return "ALLOW": return None (let message through)
+        if detect_injection(text) == "BLOCK":
+            self.blocked_count += 1
+            return self._block_response(
+                "Your message was blocked due to security concerns. Please contact support if you believe this is an error."
+            )
 
-        pass  # Replace with your implementation
+        if topic_filter(text) == "BLOCK":
+            self.blocked_count += 1
+            return self._block_response(
+                "Your message was blocked due to securit" \
+                "y concerns. Please contact support if you believe this is an error."
+            )
+        return None  # Allow the message to pass through
 
 
 # ============================================================
